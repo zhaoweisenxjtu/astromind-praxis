@@ -1,0 +1,30 @@
+# Astromind Praxis v0.1 Configuration
+# 星知·笃行 — 面向成年人的综合学习引擎
+# Copy this to ~/.meta-learning/config.yaml.
+# Database: ~/.meta-learning/meta_learning.db (shared with meta-learn)
+# All keys are optional — the engine degrades gracefully without them.
+
+# ── LLM Configuration ──
+# If configured: direct API mode (httpx → OpenAI-compatible API).
+# If not configured: Stdio protocol mode (uses the agent's own model).
+llm:
+  base_url: ""          # e.g. "https://api.openai.com/v1"
+  api_key: ""           # Your API key
+  model: ""             # e.g. "gpt-4o", "claude-sonnet-4-6"
+
+# ── Search API Keys ──
+# AnySearch: 1000 free queries/day with key, lower rate limits without.
+#   Get key at: https://anysearch.com/console/api-keys
+# Bing: Web Search API v7.0 via Azure Portal.
+#   Get key at: https://portal.azure.com
+#
+# Both are optional. Without any keys:
+#   Search degrades: AnySearch (anonymous) → WebFetch → Agent Stdio
+
+anysearch_api_key: ""   # https://anysearch.com/console/api-keys
+bing_key: ""            # https://portal.azure.com (Bing Web Search API v7.0)
+
+# ── Init Status ──
+init:
+  completed: false
+  timestamp: ""
