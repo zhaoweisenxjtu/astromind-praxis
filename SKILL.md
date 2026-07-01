@@ -16,8 +16,8 @@ metadata:
   tags: [learning, teaching, sm2, diagnosis, spaced-repetition, praxis]
 compatibility:
   requires: [python3, httpx, pyyaml, beautifulsoup4]
-  database: ~/.meta-learning/meta_learning.db
-  shared_config: ~/.meta-learning/config.yaml
+  database: ~/.astromind-praxis/astromind_praxis.db
+  shared_config: ~/.astromind-praxis/config.yaml
 ---
 
 # 星知·笃行 (Astromind Praxis) v0.1
@@ -117,7 +117,7 @@ SearchClient.search(query)
 | `astromind teach status <id>` | 会话状态 |
 | `astromind teach next <id>` | 下一个节点 |
 
-## 配置 (`~/.meta-learning/config.yaml`)
+## 配置 (`~/.astromind-praxis/config.yaml`)
 
 ```yaml
 llm:

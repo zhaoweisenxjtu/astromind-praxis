@@ -5,9 +5,12 @@
 """
 
 import json
+import logging
 import sys
 from typing import Optional
 from . import SearchStrategy
+
+logger = logging.getLogger(__name__)
 
 
 class AgentSearchStrategy(SearchStrategy):
@@ -42,7 +45,8 @@ class AgentSearchStrategy(SearchStrategy):
                 line = line[len("[SEARCH_RSP]"):].strip()
 
             data = json.loads(line)
-        except Exception:
+        except Exception as e:
+            logger.warning("Agent search failed: %s", e)
             return None
 
         results = data.get("results", data if isinstance(data, list) else [])

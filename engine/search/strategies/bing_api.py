@@ -1,7 +1,10 @@
 """Bing Web Search API 策略 (Tier 2)."""
 
+import logging
 from typing import Optional
 from . import SearchStrategy
+
+logger = logging.getLogger(__name__)
 
 
 class BingSearchStrategy(SearchStrategy):
@@ -25,7 +28,8 @@ class BingSearchStrategy(SearchStrategy):
             )
             resp.raise_for_status()
             data = resp.json()
-        except Exception:
+        except Exception as e:
+            logger.warning("Bing search failed: %s", e)
             return None
 
         results = []

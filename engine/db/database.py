@@ -1,11 +1,18 @@
-"""Astromind 数据库初始化（复用 meta-learning db + v5 迁移）."""
+"""Astromind Praxis 数据库初始化（独立 DB）.
+
+DB 路径: ~/.astromind-praxis/astromind_praxis.db
+与 meta-learn 的 ~/.meta-learning/meta_learning.db 完全隔离，互不影响。
+"""
 
 import json
+import logging
 import sqlite3
 from pathlib import Path
 
-DB_DIR = Path.home() / ".meta-learning"
-DB_PATH = DB_DIR / "meta_learning.db"
+logger = logging.getLogger(__name__)
+
+DB_DIR = Path.home() / ".astromind-praxis"
+DB_PATH = DB_DIR / "astromind_praxis.db"
 
 
 def get_db_path() -> str:
@@ -57,15 +64,13 @@ class Database:
 
 
 def init_db(force: bool = False):
-    """Initialize DB and run v5 migration."""
+    """Initialize DB with all required tables."""
     ensure_db_dir()
     if not DB_PATH.exists():
-        # Create empty file
         DB_PATH.touch()
 
     db = Database()
 
-    # Check if v5 tables exist
     existing = {
         r["name"]
         for r in db.fetch_all(
@@ -73,6 +78,81 @@ def init_db(force: bool = False):
         )
     }
 
+    # ── Users ──
+    if "users" not in existing:
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                name         TEXT    NOT NULL UNIQUE,
+                display_name TEXT    NOT NULL DEFAULT '',
+                config       TEXT    NOT NULL DEFAULT '{}',
+                created_at   TEXT    NOT NULL,
+                updated_at   TEXT    NOT NULL
+            )
+        """)
+
+    # ── Learning Tracks ──
+    if "tracks" not in existing:
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS tracks (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                name            TEXT    NOT NULL,
+                target_type     TEXT    NOT NULL DEFAULT 'interest'
+                    CHECK (target_type IN ('exam', 'applied', 'interest')),
+                status          TEXT    NOT NULL DEFAULT 'active'
+                    CHECK (status IN ('active', 'paused', 'completed', 'archived')),
+                priority        INTEGER NOT NULL DEFAULT 3 CHECK (priority BETWEEN 1 AND 5),
+                level           INTEGER DEFAULT 1 CHECK (level BETWEEN 1 AND 5),
+                created_at      TEXT    NOT NULL,
+                updated_at      TEXT    NOT NULL
+            )
+        """)
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tracks_user_status ON tracks(user_id, status)"
+        )
+
+    # ── Knowledge Nodes ──
+    if "knowledge_nodes" not in existing:
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS knowledge_nodes (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                track_id      INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+                name          TEXT    NOT NULL,
+                description   TEXT    NOT NULL DEFAULT '',
+                node_type     TEXT    NOT NULL DEFAULT 'concept'
+                    CHECK (node_type IN ('concept','fact','principle','procedure','framework','case')),
+                importance    INTEGER NOT NULL DEFAULT 3 CHECK (importance BETWEEN 1 AND 5),
+                complexity    INTEGER DEFAULT 3 CHECK (complexity BETWEEN 1 AND 5),
+                node_level    TEXT    DEFAULT 'concept',
+                status        TEXT    NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending','active','mastered','archived')),
+                ef            REAL    NOT NULL DEFAULT 2.5 CHECK (ef >= 1.3),
+                interval      INTEGER NOT NULL DEFAULT 0 CHECK (interval >= 0),
+                repetitions   INTEGER NOT NULL DEFAULT 0 CHECK (repetitions >= 0),
+                next_review   TEXT,
+                created_at    TEXT    NOT NULL,
+                updated_at    TEXT    NOT NULL
+            )
+        """)
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_nodes_track_status ON knowledge_nodes(track_id, status)"
+        )
+
+    # ── Node Dependencies ──
+    if "node_dependencies" not in existing:
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS node_dependencies (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                node_id       INTEGER NOT NULL REFERENCES knowledge_nodes(id) ON DELETE CASCADE,
+                depends_on_id INTEGER NOT NULL REFERENCES knowledge_nodes(id) ON DELETE CASCADE,
+                relation_type TEXT    NOT NULL DEFAULT 'prerequisite'
+                    CHECK (relation_type IN ('prerequisite','related','part_of','extends','example_of')),
+                UNIQUE(node_id, depends_on_id)
+            )
+        """)
+
+    # ── Workflow Context (教学会话状态) ──
     if "workflow_context" not in existing:
         db.execute("""
             CREATE TABLE IF NOT EXISTS workflow_context (
@@ -99,6 +179,7 @@ def init_db(force: bool = False):
             "CREATE INDEX IF NOT EXISTS idx_wfc_track ON workflow_context(track_id)"
         )
 
+    # ── Interaction Log ──
     if "interaction_log" not in existing:
         db.execute("""
             CREATE TABLE IF NOT EXISTS interaction_log (
@@ -119,29 +200,19 @@ def init_db(force: bool = False):
             "CREATE INDEX IF NOT EXISTS idx_il_user_track ON interaction_log(user_id, track_id)"
         )
 
-    if "knowledge_edges" not in existing:
+    # ── Misconceptions ──
+    if "misconceptions" not in existing:
         db.execute("""
-            CREATE TABLE IF NOT EXISTS knowledge_edges (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                track_id        INTEGER NOT NULL,
-                source_node_id  INTEGER NOT NULL,
-                target_node_id  INTEGER NOT NULL,
-                relation_type   TEXT    NOT NULL DEFAULT 'related'
-                    CHECK (relation_type IN ('prerequisite','related','part_of','extends','example_of')),
-                created_at      TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
-                UNIQUE(track_id, source_node_id, target_node_id)
+            CREATE TABLE IF NOT EXISTS misconceptions (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id       TEXT    NOT NULL,
+                node_id       INTEGER NOT NULL,
+                misconception TEXT    NOT NULL,
+                correction    TEXT    NOT NULL DEFAULT '',
+                created_at    TEXT    NOT NULL
             )
         """)
 
-    # Add astromind-praxis-specific columns to knowledge_nodes
-    try:
-        db.execute("ALTER TABLE knowledge_nodes ADD COLUMN complexity INTEGER DEFAULT 3")
-    except sqlite3.OperationalError:
-        pass  # already exists
-    try:
-        db.execute("ALTER TABLE knowledge_nodes ADD COLUMN node_level TEXT DEFAULT 'concept'")
-    except sqlite3.OperationalError:
-        pass
-
     db.close()
+    logger.info("Database initialized at %s", DB_PATH)
     return True

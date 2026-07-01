@@ -448,8 +448,8 @@ class TeachingOrchestrator:
             )
             if rows:
                 return [r["name"] for r in rows]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to get prerequisites for node %d: %s", node_id, e)
         return []
 
     def _get_node_misconceptions(self, session: dict, concept: str) -> list[dict]:
@@ -487,7 +487,6 @@ class TeachingOrchestrator:
             "extends": "supports",
         }
         mapped = relation_map.get(relation, "related")
-        # node_dependencies: node_id=target, depends_on_id=source
         try:
             self.db.execute(
                 "INSERT OR IGNORE INTO node_dependencies "
@@ -495,8 +494,9 @@ class TeachingOrchestrator:
                 "VALUES (?, ?, ?)",
                 [target_id, source_id, mapped],
             )
-        except Exception:
-            pass  # table may not exist; non-critical
+        except Exception as e:
+            logger.warning("Failed to create edge %d->%d (%s): %s",
+                          source_id, target_id, mapped, e)
 
     def _apply_sm2(self, node_id: int, quality: int) -> dict:
         """应用 SM-2 算法更新节点复习参数."""
@@ -532,11 +532,10 @@ class TeachingOrchestrator:
                            question: str, answer: str,
                            correct: bool, level: int,
                            fake_signals: list):
-        """存储互动记录."""
+        """存储互动记录到 interaction_log 表."""
         from datetime import timezone
         now = datetime.now(timezone.utc).isoformat()
         signals_json = json.dumps(fake_signals, ensure_ascii=False)
-        # Prefer interaction_log (v5); fall back to legacy table
         try:
             self.db.execute(
                 """INSERT INTO interaction_log
@@ -546,18 +545,8 @@ class TeachingOrchestrator:
                 [user_id, self.track_id, node_id, question, answer,
                  int(correct), level, signals_json, now],
             )
-        except Exception:
-            try:
-                self.db.execute(
-                    """INSERT INTO teaching_interactions
-                       (session_id, user_id, track_id, node_id,
-                        interaction_type, level_after, created_at)
-                       VALUES (?, ?, ?, ?, 'instant_test', ?, ?)""",
-                    [f"session_{self.user_id}", user_id, self.track_id,
-                     node_id, level, now],
-                )
-            except Exception:
-                pass
+        except Exception as e:
+            logger.error("Failed to store interaction: %s", e)
 
     def _store_misconception(self, node_id: int, misconception: str,
                              correction: str):
@@ -571,11 +560,11 @@ class TeachingOrchestrator:
                    VALUES (?, ?, ?, ?, ?)""",
                 [self.user_id, node_id, misconception, correction, now],
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to store misconception for node %d: %s", node_id, e)
 
     def _get_interactions(self, user_id: str, track_id: int) -> list[dict]:
-        """获取用户在当前路线的全部互动记录."""
+        """获取用户在当前路线的全部互动记录 (仅 interaction_log)."""
         try:
             rows = self.db.fetch_all(
                 "SELECT * FROM interaction_log "
@@ -585,18 +574,9 @@ class TeachingOrchestrator:
             )
             if rows:
                 return [dict(r) for r in rows]
-        except Exception:
-            pass
-        try:
-            rows = self.db.fetch_all(
-                "SELECT * FROM teaching_interactions "
-                "WHERE user_id = ? AND track_id = ? "
-                "ORDER BY created_at ASC",
-                [user_id, track_id],
-            )
-            return [dict(r) for r in rows] if rows else []
-        except Exception:
-            return []
+        except Exception as e:
+            logger.warning("Failed to get interactions for user %s: %s", user_id, e)
+        return []
 
     def _compute_stats(self, interactions: list[dict]) -> dict:
         """计算学习互动统计."""
@@ -607,10 +587,16 @@ class TeachingOrchestrator:
 
         correct = sum(1 for i in interactions if i.get("is_correct"))
         levels = [i.get("understanding_level", 1) for i in interactions]
-        fake_count = sum(
-            1 for i in interactions
-            if i.get("fake_signals") and json.loads(i["fake_signals"])
-        )
+        fake_count = 0
+        for i in interactions:
+            raw = i.get("fake_signals")
+            if raw:
+                try:
+                    signals = json.loads(raw)
+                    if signals:
+                        fake_count += 1
+                except (json.JSONDecodeError, TypeError):
+                    pass
 
         return {
             "total": total,

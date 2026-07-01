@@ -14,11 +14,14 @@
 
 import argparse
 import json
+import logging
 import os
 import sys
 from pathlib import Path
 
-CONFIG_DIR = Path.home() / ".meta-learning"
+logger = logging.getLogger(__name__)
+
+CONFIG_DIR = Path.home() / ".astromind-praxis"
 CONFIG_PATH = CONFIG_DIR / "config.yaml"
 
 
@@ -31,7 +34,8 @@ def load_config() -> dict:
         import yaml
         with open(CONFIG_PATH, encoding="utf-8") as f:
             return yaml.safe_load(f) or {}
-    except Exception:
+    except Exception as e:
+        logger.warning("Failed to load config from %s: %s", CONFIG_PATH, e)
         return {}
 
 
@@ -119,16 +123,25 @@ def cmd_init(args):
 
 # ── Teach subcommands ──
 
-def _create_orchestrator(config: dict, user_id: str = "default"):
+def _create_orchestrator(config: dict, user_name: str = "default"):
+    """Create TeachingOrchestrator for a user.
+
+    Flow:
+      1. Init DB
+      2. Look up user by name in users table (INTEGER id)
+      3. Create user if not exists
+      4. Get or create an active track for that user
+      5. Return orchestrator bound to the track
+    """
     from .db.database import Database, init_db
     from .llm.client import LLMClient
     from .search.client import SearchClient
     from .teaching.workflow import TeachingOrchestrator
 
-    # Init DB
     init_db()
+    db = Database()
 
-    # LLM
+    # ── LLM ──
     llm_config = config.get("llm", {})
     llm = LLMClient(
         base_url=llm_config.get("base_url", ""),
@@ -136,37 +149,31 @@ def _create_orchestrator(config: dict, user_id: str = "default"):
         model=llm_config.get("model", ""),
     )
 
-    # Search
+    # ── Search ──
     search = SearchClient(
         anysearch_api_key=config.get("anysearch_api_key", ""),
         bing_api_key=config.get("bing_key", ""),
         is_agent_mode=not bool(config.get("llm", {}).get("api_key")),
     )
 
-    # Get or create track
-    db = Database()
-
-    # Check if track exists for user
+    # ── User: lookup by name (users.id is INTEGER) ──
     user_row = db.fetch_one(
-        "SELECT id FROM tracks WHERE user_id = ? ORDER BY id DESC LIMIT 1",
-        [user_id],
-    )
-    # users table has INTEGER id, not TEXT. Look up by name.
-    user_row = db.fetch_one(
-        "SELECT id FROM users WHERE name = ?", [user_id]
+        "SELECT id FROM users WHERE name = ?", [user_name]
     )
     if not user_row:
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc).isoformat()
         db.execute(
             "INSERT INTO users (name, display_name, created_at, updated_at) VALUES (?, ?, ?, ?)",
-            [user_id, user_id, now, now],
+            [user_name, user_name, now, now],
         )
-        user_row = db.fetch_one("SELECT id FROM users WHERE name = ?", [user_id])
+        user_row = db.fetch_one("SELECT id FROM users WHERE name = ?", [user_name])
+        if not user_row:
+            raise RuntimeError(f"Failed to create user '{user_name}'")
 
     db_user_id = user_row["id"]
 
-    # Get or create track
+    # ── Track: get active or create new ──
     track_row = db.fetch_one(
         "SELECT id FROM tracks WHERE user_id = ? AND status = 'active' ORDER BY id DESC LIMIT 1",
         [db_user_id],
@@ -176,13 +183,18 @@ def _create_orchestrator(config: dict, user_id: str = "default"):
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc).isoformat()
         db.execute(
-            "INSERT INTO tracks (user_id, name, target_type, status, priority, created_at, updated_at) VALUES (?, ?, ?, 'active', 3, ?, ?)",
+            "INSERT INTO tracks (user_id, name, target_type, status, priority, created_at, updated_at) "
+            "VALUES (?, ?, ?, 'active', 3, ?, ?)",
             [db_user_id, args_topic, "interest", now, now],
         )
-        track_row = db.fetch_one("SELECT id FROM tracks WHERE user_id = ? ORDER BY id DESC LIMIT 1", [db_user_id])
+        track_row = db.fetch_one(
+            "SELECT id FROM tracks WHERE user_id = ? ORDER BY id DESC LIMIT 1",
+            [db_user_id],
+        )
+        if not track_row:
+            raise RuntimeError(f"Failed to create track for user '{user_name}'")
 
-    orchestrator = TeachingOrchestrator(db, llm, search, str(db_user_id), track_row["id"])
-    return orchestrator
+    return TeachingOrchestrator(db, llm, search, str(db_user_id), track_row["id"])
 
 
 def cmd_teach_diagnose(args):

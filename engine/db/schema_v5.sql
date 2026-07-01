@@ -1,5 +1,5 @@
 -- Astromind Praxis v0.1 Schema Extension (v5)
--- 星知·笃行 — 在 meta-learn v4 基础上新增 workflow_context 表 + teaching_interactions 别名
+-- 星知·笃行 — 独立 DB 完整 schema（不与 meta-learn 共用）
 
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;

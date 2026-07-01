@@ -12,7 +12,7 @@ def test_database_init():
     import engine.db.database as db_mod
     orig_dir, orig_path = db_mod.DB_DIR, db_mod.DB_PATH
     db_mod.DB_DIR = tmp_dir
-    db_mod.DB_PATH = tmp_dir / "meta_learning.db"
+    db_mod.DB_PATH = tmp_dir / "astromind_praxis.db"
     try:
         result = init_db(force=True)
         assert result is True
