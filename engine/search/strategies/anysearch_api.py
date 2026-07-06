@@ -1,10 +1,13 @@
 """AnySearch JSON-RPC 2.0 直连策略 (Tier 1)."""
 
 import json
+import logging
 import re
 import requests
 from typing import Optional
 from . import SearchStrategy
+
+logger = logging.getLogger(__name__)
 
 ENDPOINT = "https://api.anysearch.com/mcp"
 
@@ -49,18 +52,24 @@ class AnySearchStrategy(SearchStrategy):
             resp = requests.post(ENDPOINT, json=payload, headers=headers, timeout=30)
             resp.raise_for_status()
             data = resp.json()
-        except requests.exceptions.ConnectionError:
+        except requests.exceptions.ConnectionError as e:
+            logger.warning("AnySearch connection failed: %s", e)
             return None
-        except requests.exceptions.Timeout:
+        except requests.exceptions.Timeout as e:
+            logger.warning("AnySearch timeout: %s", e)
             return None
-        except requests.exceptions.HTTPError:
+        except requests.exceptions.HTTPError as e:
+            logger.warning("AnySearch HTTP error: %s", e)
             return None
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            logger.warning("AnySearch JSON decode error: %s", e)
             return None
-        except Exception:
+        except Exception as e:
+            logger.warning("AnySearch unexpected error: %s", e)
             return None
 
         if "error" in data:
+            logger.warning("AnySearch API returned error: %s", data["error"])
             return None
 
         result = data.get("result", {})

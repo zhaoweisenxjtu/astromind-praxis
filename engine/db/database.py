@@ -1,4 +1,4 @@
-"""Astromind Praxis 数据库初始化（独立 DB）.
+﻿"""Astromind Praxis 数据库初始化（独立 DB）.
 
 DB 路径: ~/.astromind-praxis/astromind_praxis.db
 与 meta-learn 的 ~/.meta-learning/meta_learning.db 完全隔离，互不影响。
@@ -8,6 +8,7 @@ import json
 import logging
 import sqlite3
 from pathlib import Path
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ def ensure_db_dir():
 class Database:
     """Thin wrapper around sqlite3 with convenience methods."""
 
-    def __init__(self, db_path: str | None = None):
+    def __init__(self, db_path: Optional[str] = None):
         self.db_path = db_path or str(DB_PATH)
         self._conn: sqlite3.Connection | None = None
 

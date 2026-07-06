@@ -1,4 +1,4 @@
--- Astromind Praxis v0.1 Schema Extension (v5)
+﻿-- Astromind Praxis v0.1 Schema Extension (v5)
 -- 星知·笃行 — 独立 DB 完整 schema（不与 meta-learn 共用）
 
 PRAGMA journal_mode = WAL;

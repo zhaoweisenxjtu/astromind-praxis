@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Astromind Praxis CLI — 星知·笃行 认知科学驱动的元学习引擎 (v0.1).
+"""Astromind Praxis CLI — 星知·笃行 认知科学驱动的元学习引擎 (v0.1.1).
 
 用法:
   astromind init                    交互式初始化配置
@@ -77,7 +77,7 @@ def cmd_init(args):
         config = load_config()
 
     print("=" * 50)
-    print("  星知·笃行 (Astromind Praxis) v0.1 — Configuration Wizard")
+    print("  星知·笃行 (Astromind Praxis) v0.1.1 — Configuration Wizard")
     print("=" * 50)
     print("(Press Enter to skip any field)\n")
 
@@ -354,7 +354,7 @@ def cmd_teach_next(args):
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="astromind",
-        description="星知·笃行 — 认知科学驱动的元学习引擎 v0.1",
+        description="星知·笃行 — 认知科学驱动的元学习引擎 v0.1.1",
     )
 
     sub = parser.add_subparsers(dest="command", help="Commands")

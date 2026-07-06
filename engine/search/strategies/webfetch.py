@@ -4,6 +4,7 @@
 无需 API key，纯 HTML 解析。
 """
 
+import logging
 import re
 import time
 from typing import Optional
@@ -20,6 +21,8 @@ HEADERS = {
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
     "Accept-Encoding": "identity",
 }
+
+logger = logging.getLogger(__name__)
 
 
 class WebFetchSearchStrategy(SearchStrategy):
@@ -50,6 +53,7 @@ class WebFetchSearchStrategy(SearchStrategy):
             try:
                 results = func(query, max_results)
                 if results is None:
+                    logger.debug("WebFetch engine %s returned None, degrading", name)
                     continue
                 for r in results:
                     if r["url"] and r["url"] not in seen_urls:
@@ -57,7 +61,8 @@ class WebFetchSearchStrategy(SearchStrategy):
                         all_results.append(r)
                         if len(all_results) >= max_results:
                             return all_results[:max_results]
-            except Exception:
+            except Exception as e:
+                logger.debug("WebFetch engine %s failed: %s", name, e)
                 continue
 
         return all_results[:max_results] if all_results else []
@@ -155,6 +160,7 @@ class WebFetchSearchStrategy(SearchStrategy):
 
         # Check for anti-bot challenge
         if resp.status_code == 202 or "challenge-form" in resp.text:
+            logger.debug("DuckDuckGo returned challenge page, degrading")
             return None
 
         return self._parse_html(resp.text, "duckduckgo")
@@ -173,6 +179,7 @@ class WebFetchSearchStrategy(SearchStrategy):
 
         # Check for captcha
         if "captcha" in resp.text.lower() or "unusual traffic" in resp.text.lower():
+            logger.debug("Bing CN returned captcha page, degrading")
             return None
 
         return self._parse_html(resp.text, "bing_cn")
