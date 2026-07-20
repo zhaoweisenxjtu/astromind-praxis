@@ -1,6 +1,6 @@
 ---
 name: astromind-praxis
-version: "0.1.1"
+version: "0.1.4"
 description: >
   星知·笃行 — 面向成年人的综合学习引擎。代码固化流程 + 关键环节 LLM 调用。
   诊断→教学→评估→复习闭环，知行合一，学以致用。
@@ -10,17 +10,17 @@ allowed-tools:
   - Bash: execute astromind CLI commands
   - Write: create output files
 metadata:
-  version: 0.1
+  version: 0.1.4
   stability: alpha
   owner: meta-learn team
   tags: [learning, teaching, sm2, diagnosis, spaced-repetition, praxis]
 compatibility:
   requires: [python3, httpx, pyyaml, beautifulsoup4]
-  database: ~/.astromind-praxis/astromind_praxis.db
+  database: ~/.astromind-praxis/astromind_praxis.db (v6 unified schema)
   shared_config: ~/.astromind-praxis/config.yaml
 ---
 
-# 星知·笃行 (Astromind Praxis) v0.1
+# 星知·笃行 (Astromind Praxis) v0.1.4
 
 程序驱动的教学引擎。关键环节调用 LLM，搜索走降级链，教学流程代码固化。
 
@@ -131,6 +131,14 @@ bing_key: ""            # 可选，提额度
 ---
 
 ## Changelog
+
+### v0.1.2 (2026-07-07)
+
+- **merge**: ?? meta-learning ?? 16 ?? + astromind ? workflow_context + interaction_log
+- **new**: FTS5 ???? + ?????? + ???? + ????? + ???
+- **new**: CLI ????? 17 ????????
+- **new**: migrate meta-db ??????
+- **perf**: ??????? + LLM Stdio ?? + ?????
 
 ### v0.1.1 (2026-07-06)
 

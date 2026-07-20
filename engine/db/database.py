@@ -1,12 +1,13 @@
-﻿"""Astromind Praxis 数据库初始化（独立 DB）.
+"""Astromind Praxis v0.1.2 Database initialization.
 
-DB 路径: ~/.astromind-praxis/astromind_praxis.db
-与 meta-learn 的 ~/.meta-learning/meta_learning.db 完全隔离，互不影响。
+Unified database at ~/.astromind-praxis/astromind_praxis.db
+Merges meta-learning (16 tables) + astromind workflow_context + interaction_log.
 """
 
 import json
 import logging
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -14,7 +15,10 @@ logger = logging.getLogger(__name__)
 
 DB_DIR = Path.home() / ".astromind-praxis"
 DB_PATH = DB_DIR / "astromind_praxis.db"
+SCHEMA_PATH = Path(__file__).parent / "schema_v6.sql"
 
+
+# ?? Path helpers ??
 
 def get_db_path() -> str:
     return str(DB_PATH)
@@ -23,6 +27,32 @@ def get_db_path() -> str:
 def ensure_db_dir():
     DB_DIR.mkdir(parents=True, exist_ok=True)
 
+
+# ?? Row utilities (compatible with meta-learning DAOs) ??
+
+def row_to_dict(row: sqlite3.Row | None) -> dict | None:
+    if row is None:
+        return None
+    return dict(row)
+
+
+def rows_to_dicts(rows: list[sqlite3.Row]) -> list[dict]:
+    return [dict(r) for r in rows]
+
+
+# ?? Connection (compatible with meta-learning DAO pattern) ??
+
+def get_connection() -> sqlite3.Connection:
+    """Get a new SQLite connection with WAL mode and foreign keys."""
+    ensure_db_dir()
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA foreign_keys=ON;")
+    return conn
+
+
+# ?? Database class (astromind pattern, used by TeachingOrchestrator) ??
 
 class Database:
     """Thin wrapper around sqlite3 with convenience methods."""
@@ -64,156 +94,175 @@ class Database:
         self.close()
 
 
+# ?? Schema helpers ??
+
+def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+        (name,),
+    ).fetchone() is not None
+
+
+def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    cols = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return any(c["name"] == column for c in cols)
+
+
+def _has_workflow_context(conn: sqlite3.Connection) -> bool:
+    """Detect if this is an astromind v0.1.1 DB (has workflow_context table)."""
+    return _table_exists(conn, "workflow_context")
+
+
+def _has_teaching_interactions(conn: sqlite3.Connection) -> bool:
+    """Detect if this is a meta-learning DB (has teaching_interactions)."""
+    return _table_exists(conn, "teaching_interactions")
+
+
+# ?? Migration: add columns to existing tables ??
+
+_CONTENT_COLUMNS = [
+    ("content", "TEXT NOT NULL DEFAULT ''"),
+    ("content_format", "TEXT NOT NULL DEFAULT 'markdown'"),
+    ("source_url", "TEXT NOT NULL DEFAULT ''"),
+    ("source_title", "TEXT NOT NULL DEFAULT ''"),
+    ("quality_score", "INTEGER DEFAULT 0"),
+    ("cached_at", "TEXT"),
+    ("tags", "TEXT NOT NULL DEFAULT '[]'"),
+]
+
+_QUALITY_COLUMNS = [
+    ("node_type", "TEXT NOT NULL DEFAULT 'concept'"),
+    ("theory_level", "INTEGER DEFAULT 0"),
+    ("data_level", "INTEGER DEFAULT 0"),
+    ("method_level", "INTEGER DEFAULT 0"),
+    ("source_reliability", "INTEGER DEFAULT 0"),
+    ("freshness_date", "TEXT"),
+    ("completeness", "INTEGER DEFAULT 0"),
+    ("consistency", "INTEGER DEFAULT 0"),
+]
+
+
+def _migrate_knowledge_nodes(conn: sqlite3.Connection):
+    """Add content + quality columns to knowledge_nodes if missing."""
+    existing = {c["name"] for c in conn.execute("PRAGMA table_info(knowledge_nodes)").fetchall()}
+    for col_name, col_def in _CONTENT_COLUMNS + _QUALITY_COLUMNS:
+        if col_name not in existing:
+            conn.execute(f"ALTER TABLE knowledge_nodes ADD COLUMN {col_name} {col_def}")
+
+
+def _migrate_assessment_log(conn: sqlite3.Connection):
+    """Add quality columns to assessment_log if missing."""
+    existing = {c["name"] for c in conn.execute("PRAGMA table_info(assessment_log)").fetchall()}
+    for col_name, col_def in [
+        ("quality_before", "INTEGER DEFAULT 0"),
+        ("quality_after", "INTEGER DEFAULT 0"),
+        ("quality_notes", "TEXT NOT NULL DEFAULT ''"),
+    ]:
+        if col_name not in existing:
+            conn.execute(f"ALTER TABLE assessment_log ADD COLUMN {col_name} {col_def}")
+
+
+def _create_missing_tables(conn: sqlite3.Connection, schema_path: Path):
+    """Create any tables from schema_v6.sql that don't exist yet."""
+    schema_text = schema_path.read_text(encoding="utf-8")
+    import re
+    for match in re.finditer(r"CREATE (?:VIRTUAL )?TABLE IF NOT EXISTS (\w+)", schema_text):
+        name = match.group(1)
+        if not _table_exists(conn, name):
+            # Find and execute the full DDL for this table
+            pos = match.start()
+            end = schema_text.find(");\n", pos)
+            if end != -1:
+                ddl = schema_text[pos:end + 3]
+                conn.executescript(ddl)
+
+
+def _init_fts(conn: sqlite3.Connection):
+    """Create FTS5 virtual table + triggers if they don't exist."""
+    if _table_exists(conn, "knowledge_fts"):
+        return
+    if not _column_exists(conn, "knowledge_nodes", "content"):
+        return
+    conn.executescript("""
+        CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts USING fts5(
+            name, content, tags, source_title,
+            content='knowledge_nodes',
+            content_rowid='id',
+            tokenize='unicode61'
+        );
+        CREATE TRIGGER IF NOT EXISTS knowledge_fts_insert AFTER INSERT ON knowledge_nodes BEGIN
+            INSERT INTO knowledge_fts(rowid, name, content, tags, source_title)
+            VALUES (new.id, new.name, new.content, new.tags, new.source_title);
+        END;
+        CREATE TRIGGER IF NOT EXISTS knowledge_fts_delete AFTER DELETE ON knowledge_nodes BEGIN
+            INSERT INTO knowledge_fts(knowledge_fts, rowid, name, content, tags, source_title)
+            VALUES ('delete', old.id, old.name, old.content, old.tags, old.source_title);
+        END;
+        CREATE TRIGGER IF NOT EXISTS knowledge_fts_update AFTER UPDATE ON knowledge_nodes BEGIN
+            INSERT INTO knowledge_fts(knowledge_fts, rowid, name, content, tags, source_title)
+            VALUES ('delete', old.id, old.name, old.content, old.tags, old.source_title);
+            INSERT INTO knowledge_fts(rowid, name, content, tags, source_title)
+            VALUES (new.id, new.name, new.content, new.tags, new.source_title);
+        END;
+    """)
+
+
+# ?? Main init ??
+
 def init_db(force: bool = False):
-    """Initialize DB with all required tables."""
+    """Initialize or migrate database to v6 schema."""
     ensure_db_dir()
     if not DB_PATH.exists():
         DB_PATH.touch()
 
-    db = Database()
+    conn = get_connection()
+    try:
+        existing = {
+            r["name"]
+            for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
 
-    existing = {
-        r["name"]
-        for r in db.fetch_all(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        )
-    }
+        if not existing:
+            # Fresh init: run full schema
+            schema = SCHEMA_PATH.read_text(encoding="utf-8")
+            conn.executescript(schema)
+            conn.commit()
+            logger.info("Fresh database initialized at %s (v6 schema, %d tables)", DB_PATH, 17)
+        else:
+            # Migration path
+            old_astro = _has_workflow_context(conn)
+            old_meta = _has_teaching_interactions(conn)
 
-    # ── Users ──
-    if "users" not in existing:
-        db.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                name         TEXT    NOT NULL UNIQUE,
-                display_name TEXT    NOT NULL DEFAULT '',
-                config       TEXT    NOT NULL DEFAULT '{}',
-                created_at   TEXT    NOT NULL,
-                updated_at   TEXT    NOT NULL
-            )
-        """)
+            if old_astro:
+                logger.info("Detected astromind v0.1.1 DB, upgrading to v6")
+                # Add meta-learning tables that don't exist
+                _create_missing_tables(conn, SCHEMA_PATH)
+                _migrate_knowledge_nodes(conn)
+                _migrate_assessment_log(conn)
+                _init_fts(conn)
+                conn.commit()
+                logger.info("Upgraded from astromind v0.1.1 to v6")
 
-    # ── Learning Tracks ──
-    if "tracks" not in existing:
-        db.execute("""
-            CREATE TABLE IF NOT EXISTS tracks (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                name            TEXT    NOT NULL,
-                target_type     TEXT    NOT NULL DEFAULT 'interest'
-                    CHECK (target_type IN ('exam', 'applied', 'interest')),
-                status          TEXT    NOT NULL DEFAULT 'active'
-                    CHECK (status IN ('active', 'paused', 'completed', 'archived')),
-                priority        INTEGER NOT NULL DEFAULT 3 CHECK (priority BETWEEN 1 AND 5),
-                level           INTEGER DEFAULT 1 CHECK (level BETWEEN 1 AND 5),
-                created_at      TEXT    NOT NULL,
-                updated_at      TEXT    NOT NULL
-            )
-        """)
-        db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_tracks_user_status ON tracks(user_id, status)"
-        )
+            if old_meta and not old_astro:
+                logger.info("Detected meta-learning DB, upgrading to v6")
+                # Add workflow_context + interaction_log tables
+                _create_missing_tables(conn, SCHEMA_PATH)
+                _init_fts(conn)
+                conn.commit()
+                logger.info("Upgraded from meta-learning to v6")
 
-    # ── Knowledge Nodes ──
-    if "knowledge_nodes" not in existing:
-        db.execute("""
-            CREATE TABLE IF NOT EXISTS knowledge_nodes (
-                id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                track_id      INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
-                name          TEXT    NOT NULL,
-                description   TEXT    NOT NULL DEFAULT '',
-                node_type     TEXT    NOT NULL DEFAULT 'concept'
-                    CHECK (node_type IN ('concept','fact','principle','procedure','framework','case')),
-                importance    INTEGER NOT NULL DEFAULT 3 CHECK (importance BETWEEN 1 AND 5),
-                complexity    INTEGER DEFAULT 3 CHECK (complexity BETWEEN 1 AND 5),
-                node_level    TEXT    DEFAULT 'concept',
-                status        TEXT    NOT NULL DEFAULT 'pending'
-                    CHECK (status IN ('pending','active','mastered','archived')),
-                ef            REAL    NOT NULL DEFAULT 2.5 CHECK (ef >= 1.3),
-                interval      INTEGER NOT NULL DEFAULT 0 CHECK (interval >= 0),
-                repetitions   INTEGER NOT NULL DEFAULT 0 CHECK (repetitions >= 0),
-                next_review   TEXT,
-                created_at    TEXT    NOT NULL,
-                updated_at    TEXT    NOT NULL
-            )
-        """)
-        db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_nodes_track_status ON knowledge_nodes(track_id, status)"
-        )
+            if not old_astro and not old_meta:
+                # Some other schema version, just ensure all tables exist
+                _create_missing_tables(conn, SCHEMA_PATH)
+                _migrate_knowledge_nodes(conn)
+                _migrate_assessment_log(conn)
+                _init_fts(conn)
+                conn.commit()
+                logger.info("Migrated unknown schema to v6")
 
-    # ── Node Dependencies ──
-    if "node_dependencies" not in existing:
-        db.execute("""
-            CREATE TABLE IF NOT EXISTS node_dependencies (
-                id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                node_id       INTEGER NOT NULL REFERENCES knowledge_nodes(id) ON DELETE CASCADE,
-                depends_on_id INTEGER NOT NULL REFERENCES knowledge_nodes(id) ON DELETE CASCADE,
-                relation_type TEXT    NOT NULL DEFAULT 'prerequisite'
-                    CHECK (relation_type IN ('prerequisite','related','part_of','extends','example_of')),
-                UNIQUE(node_id, depends_on_id)
-            )
-        """)
+    finally:
+        conn.close()
 
-    # ── Workflow Context (教学会话状态) ──
-    if "workflow_context" not in existing:
-        db.execute("""
-            CREATE TABLE IF NOT EXISTS workflow_context (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id         TEXT    NOT NULL,
-                track_id        INTEGER NOT NULL,
-                topic           TEXT    NOT NULL,
-                status          TEXT    NOT NULL DEFAULT 'diagnosed'
-                    CHECK (status IN ('diagnosed','teaching','teaching_complete',
-                                      'assessing','completed','abandoned')),
-                level           INTEGER DEFAULT 1 CHECK (level BETWEEN 1 AND 5),
-                diagnosis       TEXT    NOT NULL DEFAULT '{}',
-                current_node    INTEGER,
-                completed_nodes TEXT    NOT NULL DEFAULT '[]',
-                state_data      TEXT    NOT NULL DEFAULT '{}',
-                created_at      TEXT    NOT NULL,
-                updated_at      TEXT    NOT NULL
-            )
-        """)
-        db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_wfc_user ON workflow_context(user_id)"
-        )
-        db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_wfc_track ON workflow_context(track_id)"
-        )
-
-    # ── Interaction Log ──
-    if "interaction_log" not in existing:
-        db.execute("""
-            CREATE TABLE IF NOT EXISTS interaction_log (
-                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id             TEXT    NOT NULL,
-                track_id            INTEGER NOT NULL,
-                node_id             INTEGER NOT NULL,
-                question            TEXT    NOT NULL,
-                answer              TEXT    NOT NULL DEFAULT '',
-                is_correct          INTEGER NOT NULL DEFAULT 0,
-                understanding_level INTEGER DEFAULT 1 CHECK (understanding_level BETWEEN 1 AND 5),
-                fake_signals        TEXT    NOT NULL DEFAULT '[]',
-                quality             INTEGER DEFAULT 0 CHECK (quality BETWEEN 0 AND 5),
-                created_at          TEXT    NOT NULL
-            )
-        """)
-        db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_il_user_track ON interaction_log(user_id, track_id)"
-        )
-
-    # ── Misconceptions ──
-    if "misconceptions" not in existing:
-        db.execute("""
-            CREATE TABLE IF NOT EXISTS misconceptions (
-                id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id       TEXT    NOT NULL,
-                node_id       INTEGER NOT NULL,
-                misconception TEXT    NOT NULL,
-                correction    TEXT    NOT NULL DEFAULT '',
-                created_at    TEXT    NOT NULL
-            )
-        """)
-
-    db.close()
-    logger.info("Database initialized at %s", DB_PATH)
     return True

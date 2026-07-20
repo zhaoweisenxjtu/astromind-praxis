@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Astromind Praxis CLI — 星知·笃行 认知科学驱动的元学习引擎 (v0.1.1).
+"""Astromind Praxis CLI — 星知·笃行 认知科学驱动的元学习引擎 (v0.1.2).
 
 用法:
   astromind init                    交互式初始化配置
@@ -77,7 +77,7 @@ def cmd_init(args):
         config = load_config()
 
     print("=" * 50)
-    print("  星知·笃行 (Astromind Praxis) v0.1.1 — Configuration Wizard")
+    print("  星知·笃行 (Astromind Praxis) v0.1.2 — Configuration Wizard")
     print("=" * 50)
     print("(Press Enter to skip any field)\n")
 
@@ -351,10 +351,179 @@ def cmd_teach_next(args):
 
 # ── Main CLI ──
 
+
+
+def _init_db():
+    from .db.database import init_db
+    init_db()
+
+
+def cmd_node_search(args):
+    _init_db()
+    from .db import dao_node
+    results = dao_node.search_nodes(args.keyword, args.track, args.limit)
+    if not results:
+        print("No results found.")
+        return
+    print("Search results:")
+    for n in results:
+        t = n.get("node_type", "concept") or "concept"
+        print("  #%4d  [%-12s]  %s" % (n["id"], t, n["name"]))
+        if n.get("content"):
+            print("         %s..." % n["content"][:100])
+
+
+def cmd_node_content(args):
+    _init_db()
+    from .db import dao_node
+    if args.content:
+        node = dao_node.update_node_content(args.node_id, args.content)
+        print("Node #%d content updated" % args.node_id if node else "Node #%d not found" % args.node_id)
+    elif args.file:
+        try:
+            node = dao_node.import_node_content(args.node_id, args.file)
+            if node:
+                print("Node #%d content imported from %s" % (args.node_id, args.file))
+        except FileNotFoundError as e:
+            print("Error: %s" % e)
+    else:
+        node = dao_node.get_node(args.node_id)
+        if not node:
+            print("Node #%d not found" % args.node_id)
+            return
+        print("Node #%d: %s" % (node["id"], node["name"]))
+        print("  Type: %s  Level: %s" % (node.get("node_type", "concept"), node.get("current_level", 1)))
+
+
+def cmd_track_list(args):
+    _init_db()
+    from .db import dao_track
+    tracks = dao_track.list_tracks(args.user_id, args.status)
+    if not tracks:
+        print("No tracks found.")
+        return
+    print("Tracks:")
+    for t in tracks:
+        print("  #%3d  %-30s  type=%-8s  state=%-12s  priority=%d" % (t["id"], t["name"], t["target_type"], t.get("current_state", "?"), t["priority"]))
+
+
+def cmd_review_due(args):
+    _init_db()
+    from .db import dao_node
+    if args.user_id:
+        nodes = dao_node.get_due_nodes(user_id=args.user_id)
+    elif args.track_id:
+        nodes = dao_node.get_due_nodes(track_id=args.track_id)
+    else:
+        nodes = dao_node.get_due_nodes()
+    if not nodes:
+        print("No due reviews. Great job!")
+        return
+    print("Due reviews (%d):" % len(nodes))
+    for n in nodes:
+        print("  #%4d  %-30s  next_review=%-12s  level=%d" % (n["id"], n["name"], n.get("next_review", "?") or "?", n.get("current_level", 1)))
+
+
+def cmd_report_dashboard(args):
+    _init_db()
+    from .core.indicators import Dashboard
+    from .db.database import get_connection
+    conn = get_connection()
+    try:
+        dash = Dashboard(conn)
+        print(json.dumps(dash.generate(args.user_id), ensure_ascii=False, indent=2, default=str))
+    finally:
+        conn.close()
+
+
+def cmd_graph_view(args):
+    _init_db()
+    from .db import dao_graph
+    graph = dao_graph.get_graph(args.user_id)
+    if not graph["nodes"]:
+        print("No graph data for this user.")
+        return
+    print("Knowledge Graph (%d nodes, %d edges):" % (len(graph["nodes"]), len(graph["edges"])))
+    print("")
+    for n in graph["nodes"]:
+        print("  #%3d  %-30s  level=%d" % (n["id"], n["name"], n.get("level", 1)))
+    if graph["edges"]:
+        print("")
+        for e in graph["edges"]:
+            src = next((n["name"] for n in graph["nodes"] if n["id"] == e["source_node_id"]), "#%d" % e["source_node_id"])
+            tgt = next((n["name"] for n in graph["nodes"] if n["id"] == e["target_node_id"]), "#%d" % e["target_node_id"])
+            print("  %s --[%s]--> %s" % (src, e["relation_type"], tgt))
+
+
+def cmd_schedule_today(args):
+    _init_db()
+    from .scheduler.multi_track import MultiTrackScheduler
+    sched = MultiTrackScheduler()
+    print(json.dumps(sched.get_schedule(args.user_id, args.total_minutes), ensure_ascii=False, indent=2, default=str))
+
+
+def cmd_misconception_add(args):
+    _init_db()
+    from .db import dao_misconception
+    mc = dao_misconception.add_misconception(
+        user_id=args.user_id, node_id=args.node_id,
+        misconception=args.misconception,
+        correction=args.correction or "",
+        category=args.category or "",
+    )
+    print("Misconception recorded: #%d" % mc["id"])
+
+
+def cmd_migrate_meta(args):
+    print("Starting migration from meta-learning database...")
+    source_path = args.source or str(pathlib.Path.home() / ".meta-learning" / "meta_learning.db")
+    if not pathlib.Path(source_path).exists():
+        print("Error: source database not found at", source_path)
+        sys.exit(1)
+    from .db.database import init_db, get_connection, DB_PATH
+    init_db()
+    conn_dst = get_connection()
+    try:
+        import sqlite3
+        conn_src = sqlite3.connect(str(source_path))
+        conn_src.row_factory = sqlite3.Row
+        print("Source:", source_path)
+        print("Target:", DB_PATH)
+        tables = ["users", "tracks", "knowledge_nodes", "node_dependencies",
+                   "review_history", "assessment_log", "learning_journal",
+                   "teaching_interactions", "misconceptions", "weakness_patterns",
+                   "knowledge_graph_edges", "quality_audit_log",
+                   "knowledge_sources", "knowledge_coverage"]
+        total = 0
+        for table in tables:
+            rows = conn_src.execute("SELECT * FROM [%s]" % table).fetchall()
+            if not rows:
+                print("  %s: 0 rows (skipped)" % table)
+                continue
+            cols = [d[0] for d in conn_src.execute("PRAGMA table_info([%s])" % table).fetchall()]
+            ph = ",".join(["?"] * len(cols))
+            cn = ",".join(cols)
+            ins = 0
+            for row in rows:
+                try:
+                    conn_dst.execute("INSERT OR IGNORE INTO %s (%s) VALUES (%s)" % (table, cn, ph), list(row))
+                    ins += 1
+                except Exception as e:
+                    logger.warning("Failed: %s", e)
+            conn_dst.commit()
+            total += ins
+            print("  %s: %d rows" % (table, ins))
+        print("")
+        print("Migration complete: %d rows copied across %d tables" % (total, len(tables)))
+        print("Run 'astromind report dashboard <id>' to verify.")
+    finally:
+        if conn_src:
+            conn_src.close()
+        conn_dst.close()
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="astromind",
-        description="星知·笃行 — 认知科学驱动的元学习引擎 v0.1.1",
+        description="星知·笃行 — 认知科学驱动的元学习引擎 v0.1.2",
     )
 
     sub = parser.add_subparsers(dest="command", help="Commands")
@@ -394,7 +563,66 @@ def build_parser() -> argparse.ArgumentParser:
     next_p.add_argument("session_id", type=int, help="Session ID")
     next_p.set_defaults(func=cmd_teach_next)
 
+        # node
+    p_node = sub.add_parser("node", help="Knowledge nodes")
+    ns = p_node.add_subparsers(dest="node_command")
+    p_ns = ns.add_parser("search", help="Search")
+    p_ns.add_argument("keyword")
+    p_ns.add_argument("--track", type=int)
+    p_ns.add_argument("--limit", type=int, default=20)
+    p_ns.set_defaults(func=cmd_node_search)
+    p_nc = ns.add_parser("content", help="View/set content")
+    p_nc.add_argument("node_id", type=int)
+    p_nc.add_argument("--content")
+    p_nc.add_argument("--file")
+    p_nc.set_defaults(func=cmd_node_content)
+
+    # track
+    p_tr = sub.add_parser("track", help="List tracks")
+    p_tr.add_argument("--user", dest="user_id", type=int)
+    p_tr.add_argument("--status")
+    p_tr.set_defaults(func=cmd_track_list)
+
+    # review
+    p_rv = sub.add_parser("review", help="Due reviews")
+    p_rv.add_argument("--user", dest="user_id", type=int)
+    p_rv.add_argument("--track", dest="track_id", type=int)
+    p_rv.set_defaults(func=cmd_review_due)
+
+    # report
+    p_rp = sub.add_parser("report", help="Dashboard")
+    p_rp.add_argument("user_id", type=int)
+    p_rp.set_defaults(func=cmd_report_dashboard)
+
+    # graph
+    p_gr = sub.add_parser("graph", help="Knowledge graph")
+    p_gr.add_argument("user_id", type=int)
+    p_gr.set_defaults(func=cmd_graph_view)
+
+    # schedule
+    p_sc = sub.add_parser("schedule", help="Today")
+    p_sc.add_argument("--user", dest="user_id", type=int, default=1)
+    p_sc.add_argument("--minutes", dest="total_minutes", type=int)
+    p_sc.set_defaults(func=cmd_schedule_today)
+
+    # misconception
+    p_mc = sub.add_parser("misconception", help="Record misconception")
+    p_mc.add_argument("user_id", type=int)
+    p_mc.add_argument("node_id", type=int)
+    p_mc.add_argument("misconception", help="Description")
+    p_mc.add_argument("--correction")
+    p_mc.add_argument("--category", choices=["overgeneralization","term_confusion","surface_analogy","missing_boundary","order_reversal","other"])
+    p_mc.set_defaults(func=cmd_misconception_add)
+
+    # migrate
+    p_mg = sub.add_parser("migrate", help="Migration")
+    mgs = p_mg.add_subparsers(dest="migrate_command")
+    p_mm = mgs.add_parser("meta-db", help="Migrate from meta-learning")
+    p_mm.add_argument("--source")
+    p_mm.set_defaults(func=cmd_migrate_meta)
+
     return parser
+
 
 
 def main():

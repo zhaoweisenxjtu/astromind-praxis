@@ -1,4 +1,4 @@
-﻿"""LLM 双策略客户端：直连 API / Stdio 协议.
+"""LLM 双策略客户端：直连 API / Stdio 协议.
 
 直连 API: OpenAI-compatible API (httpx, 重试+超时)
 Stdio 协议: stdout [LLM_REQ] + prompt+schema -> stdin 读 agent JSON 响应
