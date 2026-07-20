@@ -273,6 +273,116 @@ EVALUATE_ANSWER_SCHEMA = {
     },
 }
 
+# ── 作者教练提示词 ──
+
+AUTHOR_LEARNING_PATH_SYSTEM = """你是课程设计专家。为心智模型排序以构建从基础到应用的学习路径。
+考虑概念的依赖关系、复杂度递进、以及应用场景的由浅入深。"""
+
+AUTHOR_LEARNING_PATH_USER = """以下是作者的心智模型列表:
+
+{models_text}
+
+请按学习顺序排列，从基础概念到高级应用:
+{{"path": [{{"title": "...", "order": 1, "reason": "一句话理由"}}]}}"""
+
+AUTHOR_LEARNING_PATH_SCHEMA = {
+    "name": "author_learning_path",
+    "schema": {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string"},
+                        "order": {"type": "integer"},
+                        "reason": {"type": "string"},
+                    },
+                },
+            },
+        },
+        "required": ["path"],
+    },
+}
+
+AUTHOR_DEMO_SYSTEM = """你是思维模拟专家。严格基于提供的认知画像和心智模型进行推理，不添加画像中没有的特征。"""
+
+AUTHOR_DEMO_USER = """你是 {author_name} 的思维模拟器。基于作者的认知画像和心智模型，模拟该作者如何分析给定的问题。
+
+作者认知画像:
+{persona_text}
+
+作者心智模型摘要:
+{models_text}
+
+问题/场景:
+{scenario}
+
+请以作者的第一人称口吻，逐步展示分析过程:
+1. 面对这个问题，首先关注什么？
+2. 用哪个心智模型/框架来分析？
+3. 关键判断节点是什么？
+4. 最终结论与行动建议？
+
+以 JSON 格式输出:
+{{"thinking_chain": [{{"step": 1, "focus": "...", "model_used": "...", "reasoning": "..."}}],
+ "conclusion": "...",
+ "key_judgments": ["..."]}}"""
+
+AUTHOR_DEMO_SCHEMA = {
+    "name": "author_demo",
+    "schema": {
+        "type": "object",
+        "properties": {
+            "thinking_chain": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "step": {"type": "integer"},
+                        "focus": {"type": "string"},
+                        "model_used": {"type": "string"},
+                        "reasoning": {"type": "string"},
+                    },
+                },
+            },
+            "conclusion": {"type": "string"},
+            "key_judgments": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["thinking_chain", "conclusion"],
+    },
+}
+
+AUTHOR_APPLY_SYSTEM = """你是作者心智模型的应用教练。用作者的一个心智模型分析给定的实际问题。
+展示分析过程，然后出一道练习题让学习者尝试用同样的模型分析类似场景。"""
+
+AUTHOR_APPLY_USER = """心智模型:
+标题: {model_title}
+内容: {model_content}
+
+作者认知画像:
+{persona_text}
+
+用户问题:
+{problem}
+
+请:
+1. 展示作者会如何用该模型分析此问题
+2. 出一道类似的练习题，让学习者尝试应用
+输出 JSON 格式。"""
+
+AUTHOR_VALIDATE_SYSTEM = """你是写作质量评估专家。评估仿写文章是否符合作者的认知框架和表达风格。
+
+从三个维度评估 (各 1-5 分):
+1. 表达DNA辨识度 (expression_score): 语言风格、语气、句式是否像作者
+2. 认知一致性 (cognition_score): 分析逻辑是否符合作者的心智模型
+3. 诚实边界 (honesty_score): 不确定的地方是否诚实地表达了不确定
+
+综合判定: pass (三项均>=4) / pass_with_warnings (至少一项=3) / fail (有项<=2)
+
+输出 JSON: {{"expression_score": 1-5, "cognition_score": 1-5, "honesty_score": 1-5, "verdict": "pass|pass_with_warnings|fail", "notes": "评估说明"}}"""
+
 
 # ── 提示词注册表 ──
 
@@ -301,6 +411,23 @@ PROMPT_REGISTRY = {
         "system": EVALUATE_ANSWER_SYSTEM,
         "user_template": EVALUATE_ANSWER_USER,
         "schema": EVALUATE_ANSWER_SCHEMA,
+    },
+    "author_learning_path": {
+        "system": AUTHOR_LEARNING_PATH_SYSTEM,
+        "user_template": AUTHOR_LEARNING_PATH_USER,
+        "schema": AUTHOR_LEARNING_PATH_SCHEMA,
+    },
+    "author_demo": {
+        "system": AUTHOR_DEMO_SYSTEM,
+        "user_template": AUTHOR_DEMO_USER,
+        "schema": AUTHOR_DEMO_SCHEMA,
+    },
+    "author_apply": {
+        "system": AUTHOR_APPLY_SYSTEM,
+        "user_template": AUTHOR_APPLY_USER,
+    },
+    "author_validate": {
+        "system": AUTHOR_VALIDATE_SYSTEM,
     },
 }
 

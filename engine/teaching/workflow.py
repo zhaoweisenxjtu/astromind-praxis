@@ -448,43 +448,13 @@ class TeachingOrchestrator:
             for m in models
         )
 
-        prompt = f"""以下是作者的心智模型列表:
-{model_list}
-
-作者认知画像摘要:
-{persona_text[:1000]}
-
-请为这些心智模型推荐学习顺序。按 "基础认知 → 方法论 → 应用场景" 的层次排序。
-基础认知是理解其他模型的前提。
-
-以 JSON 格式输出:
-{{"path": [{{"title": "...", "order": 1, "reason": "一句话理由"}}]}}"""
-
-        schema = {
-            "name": "learning_path",
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "title": {"type": "string"},
-                                "order": {"type": "integer"},
-                                "reason": {"type": "string"},
-                            },
-                            "required": ["title", "order", "reason"],
-                        },
-                    },
-                },
-                "required": ["path"],
-            },
-        }
-
         try:
-            sys_p = "你是课程设计专家。为心智模型排序以构建从基础到应用的学习路径。"
-            result = self.llm.chat(sys_p, prompt, schema, temperature=0.3)
+            from ..llm.prompts import build_prompt
+            sys_p, user_p, schema = build_prompt(
+                "author_learning_path",
+                models_text=model_list,
+            )
+            result = self.llm.chat(sys_p, user_p, schema, temperature=0.3)
             return result.get("path", [])
         except Exception as e:
             logger.warning("Failed to build learning path: %s", e)
@@ -499,55 +469,16 @@ class TeachingOrchestrator:
             for m in models[:5]
         )
 
-        prompt = f"""你是 {author_name} 的思维模拟器。基于作者的认知画像和心智模型，模拟该作者如何分析给定的问题。
-
-作者认知画像:
-{persona_text[:2000]}
-
-作者心智模型摘要:
-{models_text[:2000]}
-
-问题/场景:
-{scenario}
-
-请以作者的第一人称口吻，逐步展示分析过程:
-1. 面对这个问题，首先关注什么？
-2. 用哪个心智模型/框架来分析？
-3. 关键判断节点是什么？
-4. 最终结论与行动建议？
-
-以 JSON 格式输出:
-{{"thinking_chain": [{{"step": 1, "focus": "...", "model_used": "...", "reasoning": "..."}}],
- "conclusion": "...",
- "key_judgments": ["..."]}}"""
-
-        schema = {
-            "name": "author_demo",
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "thinking_chain": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "step": {"type": "integer"},
-                                "focus": {"type": "string"},
-                                "model_used": {"type": "string"},
-                                "reasoning": {"type": "string"},
-                            },
-                        },
-                    },
-                    "conclusion": {"type": "string"},
-                    "key_judgments": {"type": "array", "items": {"type": "string"}},
-                },
-                "required": ["thinking_chain", "conclusion"],
-            },
-        }
-
         try:
-            sys_p = "你是思维模拟专家。严格基于提供的认知画像和心智模型进行推理，不添加画像中没有的特征。"
-            result = self.llm.chat(sys_p, prompt, schema, temperature=0.5, max_tokens=4096)
+            from ..llm.prompts import build_prompt
+            sys_p, user_p, schema = build_prompt(
+                "author_demo",
+                author_name=author_name,
+                persona_text=persona_text[:2000],
+                models_text=models_text[:2000],
+                scenario=scenario,
+            )
+            result = self.llm.chat(sys_p, user_p, schema, temperature=0.5, max_tokens=4096)
             return result
         except Exception as e:
             logger.warning("Failed to generate author demo: %s", e)
