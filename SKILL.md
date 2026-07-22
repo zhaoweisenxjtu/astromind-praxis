@@ -1,6 +1,6 @@
 ---
 name: astromind-praxis
-version: "0.1.4"
+version: "0.1.5"
 description: >
   星知·笃行 — 面向成年人的综合学习引擎。代码固化流程 + 关键环节 LLM 调用。
   诊断→教学→评估→复习闭环，知行合一，学以致用。
@@ -10,7 +10,7 @@ allowed-tools:
   - Bash: execute astromind CLI commands
   - Write: create output files
 metadata:
-  version: 0.1.4
+  version: 0.1.5
   stability: alpha
   owner: meta-learn team
   tags: [learning, teaching, sm2, diagnosis, spaced-repetition, praxis]
@@ -20,7 +20,7 @@ compatibility:
   shared_config: ~/.astromind-praxis/config.yaml
 ---
 
-# 星知·笃行 (Astromind Praxis) v0.1.4
+# 星知·笃行 (Astromind Praxis) v0.1.5
 
 程序驱动的教学引擎。关键环节调用 LLM，搜索走降级链，教学流程代码固化。
 
@@ -131,6 +131,17 @@ bing_key: ""            # 可选，提额度
 ---
 
 ## Changelog
+
+### v0.1.5 (2026-07-22)
+
+- **split**: 解耦 author-coach 为独立技能（`shared/skills/author-coach/`）
+- **remove**: 删除 `engine/db/dao_article.py`, `dao_author.py`, `dao_model.py`
+- **remove**: 删除 `engine/db/schema_v6_1.sql`, `migrate_v6_to_v6_1.py`
+- **remove**: 从 `database.py` 删除 `_ensure_v6_1_tables()` 及其调用
+- **remove**: 从 `main.py` 删除 `author` 子命令组、`get_db()`、3 个 handler
+- **remove**: 从 `prompts.py` 删除 4 组 author 提示词 (6 slots → 5 slots)
+- **remove**: 从 `workflow.py` 删除 ~365 行 author 教练方法
+- **clean**: Schema 回归纯 v6，不再引入 v6.1 author 表
 
 ### v0.1.2 (2026-07-07)
 

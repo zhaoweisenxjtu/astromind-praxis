@@ -209,18 +209,6 @@ def _init_fts(conn: sqlite3.Connection):
 
 # ?? Main init ??
 
-_SCHEMA_V6_1_PATH = Path(__file__).parent / "schema_v6_1.sql"
-
-
-def _ensure_v6_1_tables(conn: sqlite3.Connection):
-    """Create author-knowledge v6.1 tables (articles, knowledge_atoms, etc.)."""
-    if _table_exists(conn, "author_profiles"):
-        return
-    schema = _SCHEMA_V6_1_PATH.read_text(encoding="utf-8")
-    conn.executescript(schema)
-    conn.commit()
-    logger.info("Created v6.1 author-knowledge tables")
-
 
 def init_db(force: bool = False):
     """Initialize or migrate database to v6 schema."""
@@ -241,10 +229,8 @@ def init_db(force: bool = False):
             # Fresh init: run full schema
             schema = SCHEMA_PATH.read_text(encoding="utf-8")
             conn.executescript(schema)
-            # Also create v6.1 author tables
-            _ensure_v6_1_tables(conn)
             conn.commit()
-            logger.info("Fresh database initialized at %s (v6 + v6.1 schema)", DB_PATH)
+            logger.info("Fresh database initialized at %s (v6 schema)", DB_PATH)
         else:
             # Migration path
             old_astro = _has_workflow_context(conn)
@@ -274,9 +260,6 @@ def init_db(force: bool = False):
                 _init_fts(conn)
                 conn.commit()
                 logger.info("Migrated unknown schema to v6")
-
-            # Always ensure v6.1 tables exist (idempotent)
-            _ensure_v6_1_tables(conn)
 
     finally:
         conn.close()

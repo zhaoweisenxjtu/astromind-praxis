@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Astromind Praxis CLI — 星知·笃行 认知科学驱动的元学习引擎 (v0.1.2).
+"""Astromind Praxis CLI — 星知·笃行 认知科学驱动的元学习引擎 (v0.1.5).
 
 用法:
   astromind init                    交互式初始化配置
@@ -77,7 +77,7 @@ def cmd_init(args):
         config = load_config()
 
     print("=" * 50)
-    print("  星知·笃行 (Astromind Praxis) v0.1.2 — Configuration Wizard")
+    print("  星知·笃行 (Astromind Praxis) v0.1.5 — Configuration Wizard")
     print("=" * 50)
     print("(Press Enter to skip any field)\n")
 
@@ -358,13 +358,6 @@ def _init_db():
     init_db()
 
 
-def get_db():
-    """Get Database instance with v6.1 author tables guaranteed."""
-    from .db.database import init_db, Database
-    init_db()
-    return Database()
-
-
 def cmd_node_search(args):
     _init_db()
     from .db import dao_node
@@ -530,7 +523,7 @@ def cmd_migrate_meta(args):
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="astromind",
-        description="星知·笃行 — 认知科学驱动的元学习引擎 v0.1.2",
+        description="星知·笃行 — 认知科学驱动的元学习引擎 v0.1.5",
     )
 
     sub = parser.add_subparsers(dest="command", help="Commands")
@@ -621,26 +614,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_mc.add_argument("--category", choices=["overgeneralization","term_confusion","surface_analogy","missing_boundary","order_reversal","other"])
     p_mc.set_defaults(func=cmd_misconception_add)
 
-    # author — 作者教练命令 (v6.1+)
-    p_author = sub.add_parser("author", help="Author coaching commands")
-    author_sub = p_author.add_subparsers(dest="author_command", help="Author subcommands")
-
-    p_at = author_sub.add_parser("train", help="Start author coach session")
-    p_at.add_argument("author_name", help="Author name")
-    p_at.add_argument("--scenario", default=None, help="Scenario to analyze")
-    p_at.set_defaults(func=cmd_author_train)
-
-    p_aw = author_sub.add_parser("write", help="Write as author")
-    p_aw.add_argument("author_name", help="Author name")
-    p_aw.add_argument("topic", help="Topic to write about")
-    p_aw.add_argument("--no-validate", action="store_true", help="Skip quality validation")
-    p_aw.set_defaults(func=cmd_author_write)
-
-    p_aa = author_sub.add_parser("apply", help="Apply mental model to problem")
-    p_aa.add_argument("model_id", type=int, help="Mental model ID")
-    p_aa.add_argument("problem", help="Problem to analyze")
-    p_aa.set_defaults(func=cmd_author_apply)
-
     # migrate
     p_mg = sub.add_parser("migrate", help="Migration")
     mgs = p_mg.add_subparsers(dest="migrate_command")
@@ -649,65 +622,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_mm.set_defaults(func=cmd_migrate_meta)
 
     return parser
-
-
-# ── Author coach command handlers ──
-
-def cmd_author_train(args):
-    """Start author coach session."""
-    db = get_db()
-    from .teaching.workflow import TeachingOrchestrator
-    from .llm.client import LLMClient
-    config = load_config()
-    llm = LLMClient(
-        base_url=config.get("llm", {}).get("base_url", ""),
-        api_key=config.get("llm", {}).get("api_key", ""),
-        model=config.get("llm", {}).get("model", ""),
-    )
-    orch = TeachingOrchestrator(db, llm, None, "cli", 0)
-    result = orch.train_by_author(args.author_name, args.scenario)
-    print(json.dumps(result, ensure_ascii=False, indent=2))
-
-
-def cmd_author_write(args):
-    """Write an article in the author's style."""
-    db = get_db()
-    from .teaching.workflow import TeachingOrchestrator
-    from .llm.client import LLMClient
-    config = load_config()
-    llm = LLMClient(
-        base_url=config.get("llm", {}).get("base_url", ""),
-        api_key=config.get("llm", {}).get("api_key", ""),
-        model=config.get("llm", {}).get("model", ""),
-    )
-    orch = TeachingOrchestrator(db, llm, None, "cli", 0)
-    result = orch.write_as_author(
-        args.author_name, args.topic,
-        validate=not args.no_validate,
-    )
-    if "article" in result:
-        print(result["article"])
-        if "quality_report" in result:
-            print("\n--- Quality Report ---")
-            print(json.dumps(result["quality_report"], ensure_ascii=False, indent=2))
-    else:
-        print(json.dumps(result, ensure_ascii=False, indent=2))
-
-
-def cmd_author_apply(args):
-    """Apply a mental model to a problem."""
-    db = get_db()
-    from .teaching.workflow import TeachingOrchestrator
-    from .llm.client import LLMClient
-    config = load_config()
-    llm = LLMClient(
-        base_url=config.get("llm", {}).get("base_url", ""),
-        api_key=config.get("llm", {}).get("api_key", ""),
-        model=config.get("llm", {}).get("model", ""),
-    )
-    orch = TeachingOrchestrator(db, llm, None, "cli", 0)
-    result = orch.apply_mental_model(args.model_id, args.problem)
-    print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 def main():
@@ -720,7 +634,7 @@ def main():
 
     if args.command == "init":
         cmd_init(args)
-    elif args.command in ("teach", "author"):
+    elif args.command == "teach":
         sub_cmd = getattr(args, f"{args.command}_command", None)
         if sub_cmd is None:
             parser.print_help()
