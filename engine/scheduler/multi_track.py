@@ -116,9 +116,9 @@ class MultiTrackScheduler:
                     (track["id"], today),
                 ).fetchone()["cnt"]
 
-                # 停滞天数（最近无评估记录的天数）
+                # 停滞天数（最近无答题记录的天数；v0.2.2 原 assessment_log 改 interaction_log）
                 last_activity = conn.execute(
-                    "SELECT MAX(date(created_at)) AS last_date FROM assessment_log "
+                    "SELECT MAX(date(created_at)) AS last_date FROM interaction_log "
                     "WHERE track_id = ?",
                     (track["id"],),
                 ).fetchone()["last_date"]
@@ -255,13 +255,5 @@ class MultiTrackScheduler:
         }
 
     def _estimate_available_time(self, conn, user_id: int) -> int:
-        """从近期学习日志估算可用时间。"""
-        # 取最近7天的平均专注时间，默认 120 分钟
-        row = conn.execute(
-            "SELECT ROUND(AVG(focus_minutes)) AS avg_min FROM learning_journal "
-            "WHERE user_id = ? ORDER BY date DESC LIMIT 7",
-            (user_id,),
-        ).fetchone()
-        if row and row["avg_min"]:
-            return int(row["avg_min"])
+        """估算可用时间（v0.2.2: 学习日志已删，返回默认 120 分钟）。"""
         return 120

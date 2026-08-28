@@ -1,26 +1,30 @@
-"""Agent Stdio 协议搜索策略 (Tier 4 - 最后手段).
+"""Agent checkpoint 协议搜索策略 (Tier 4 - 最后手段).
 
-向 agent 发出搜索请求，由 agent 自由选择搜索方式。
-协议：stdout 输出 [SEARCH_REQ] 标记 + JSON，从 stdin 读回 JSON 响应。
+向 agent 发出搜索请求（checkpoint 协议，v0.2.1），由 agent 用自身搜索能力补答。
+协议：create_request(kind=search) 写 req-NNN.json → 抛 NeedsSearch → CLI exit 76。
+agent 补答 → Write rsp-NNN.json → resume → cache 消费。
 """
 
+import hashlib
 import json
 import logging
-import sys
 from typing import Optional
+
+from ...runs.store import NeedsSearch, Run, RunStore
 from . import SearchStrategy
 
 logger = logging.getLogger(__name__)
 
 
 class AgentSearchStrategy(SearchStrategy):
-    """通过 Stdio 协议请求 agent 执行搜索。仅 agent 模式下可用。"""
+    """通过 checkpoint 协议请求 agent 执行搜索。仅 agent 模式下可用。"""
 
-    def __init__(self):
-        self._available = None
+    def __init__(self, store: Optional[RunStore] = None, run: Optional[Run] = None):
+        self._store = store
+        self._run = run
 
     def search(self, query: str, max_results: int = 10, **kwargs) -> Optional[list[dict]]:
-        if not self._check_available():
+        if not (self._store and self._run):
             return None
 
         request = {
@@ -29,45 +33,19 @@ class AgentSearchStrategy(SearchStrategy):
             "max_results": max_results,
             **{k: v for k, v in kwargs.items() if v},
         }
+        # key = 搜索指纹（同 run 同 query 幂等）
+        key = hashlib.sha256(
+            json.dumps({"q": query, "m": max_results}, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        ).hexdigest()[:16]
 
-        try:
-            # Write request marker to stdout
-            print(f"\n[SEARCH_REQ] {json.dumps(request, ensure_ascii=False)}", flush=True)
-
-            # Read response from stdin (first line)
-            line = sys.stdin.readline()
-            if not line:
-                return None
-
-            line = line.strip()
-            # Remove optional [SEARCH_RSP] marker
-            if line.startswith("[SEARCH_RSP]"):
-                line = line[len("[SEARCH_RSP]"):].strip()
-
-            data = json.loads(line)
-        except Exception as e:
-            logger.warning("Agent search failed: %s", e)
-            return None
-
-        results = data.get("results", data if isinstance(data, list) else [])
-        if isinstance(results, dict):
-            results = [results]
-
-        parsed = []
-        for item in results:
-            if isinstance(item, dict):
-                parsed.append({
-                    "title": item.get("title", item.get("name", "")),
-                    "url": item.get("url", item.get("link", "")),
-                    "content": item.get("content", item.get("snippet", item.get("text", ""))),
-                    "source": "agent",
-                })
-
-        return parsed
-
-    def _check_available(self) -> bool:
-        """Check if we're in agent mode by verifying stdin is piped."""
-        if self._available is not None:
-            return self._available
-        self._available = not sys.stdin.isatty()
-        return self._available
+        req_path = self._store.create_request(
+            self._run,
+            kind="search",
+            key=key,
+            payload=request,
+        )
+        raise NeedsSearch(
+            run_id=self._run.id,
+            step=f"step-{len(self._run.steps):03d}",
+            req_file=req_path,
+        )

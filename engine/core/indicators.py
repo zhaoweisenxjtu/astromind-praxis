@@ -62,14 +62,14 @@ class Dashboard:
             ).fetchone()
             ontime_pct = round(row["ontime"] / row["total_due"] * 100, 1) if row["total_due"] > 0 else 0
 
-            # 月跃迁（过去30天层级提升的节点数）
+            # 月活跃（过去30天有答题记录的去重节点数；v0.2.2 原 assessment_log 跃迁指标改源）
             month_ago = (date.today() - timedelta(days=30)).isoformat()
             row = conn.execute(
-                "SELECT COUNT(DISTINCT node_id) AS jumps FROM assessment_log "
-                "WHERE user_id = ? AND created_at >= ? AND level_after > level_before",
+                "SELECT COUNT(DISTINCT node_id) AS active_nodes FROM interaction_log "
+                "WHERE user_id = ? AND date(created_at) >= ?",
                 (user_id, month_ago),
             ).fetchone()
-            monthly_jumps = row["jumps"]
+            monthly_jumps = row["active_nodes"]
 
             # 平均 EF
             row = conn.execute(
@@ -155,19 +155,17 @@ class Dashboard:
                 end_date = today - timedelta(days=w * 7)
                 start_date = end_date - timedelta(days=6)
 
-                # 周跃迁
+                # 周活跃答题数（v0.2.2: 原 assessment_log 跃迁 + learning_journal 时间改源）
                 jumps = conn.execute(
-                    "SELECT COUNT(DISTINCT node_id) AS cnt FROM assessment_log "
-                    "WHERE user_id = ? AND date(created_at) BETWEEN ? AND ? "
-                    "AND level_after > level_before",
+                    "SELECT COUNT(DISTINCT node_id) AS cnt FROM interaction_log "
+                    "WHERE user_id = ? AND date(created_at) BETWEEN ? AND ?",
                     (user_id, start_date.isoformat(), end_date.isoformat()),
                 ).fetchone()["cnt"]
 
-                # 周投入时间
+                # 周投入时间（学习日志已删，无来源则记 0；保留字段结构）
                 time_row = conn.execute(
-                    "SELECT COALESCE(SUM(focus_minutes), 0) AS total_focus "
-                    "FROM learning_journal "
-                    "WHERE user_id = ? AND date BETWEEN ? AND ?",
+                    "SELECT COUNT(*) AS total_focus FROM interaction_log "
+                    "WHERE user_id = ? AND date(created_at) BETWEEN ? AND ?",
                     (user_id, start_date.isoformat(), end_date.isoformat()),
                 ).fetchone()
 

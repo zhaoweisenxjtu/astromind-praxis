@@ -15,7 +15,6 @@ def add_misconception(
     misconception: str,
     correction: str = "",
     category: str = "",
-    interaction_id: Optional[int] = None,
 ) -> dict:
     """Add a misconception record. Returns the created record."""
     conn = get_connection()
@@ -29,8 +28,7 @@ def add_misconception(
 
         if existing:
             conn.execute(
-                "UPDATE misconceptions SET encounter_count = encounter_count + 1, "
-                "last_encountered_at = datetime('now','localtime') "
+                "UPDATE misconceptions SET encounter_count = encounter_count + 1 "
                 "WHERE id = ?",
                 (existing["id"],),
             )
@@ -39,9 +37,9 @@ def add_misconception(
 
         cur = conn.execute(
             """INSERT INTO misconceptions
-               (user_id, node_id, interaction_id, misconception, correction, category)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (user_id, node_id, interaction_id, misconception, correction, category or None),
+               (user_id, node_id, misconception, correction, category)
+               VALUES (?, ?, ?, ?, ?)""",
+            (user_id, node_id, misconception, correction, category or None),
         )
         conn.commit()
         return get_misconception(cur.lastrowid)

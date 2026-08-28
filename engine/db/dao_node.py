@@ -150,18 +150,17 @@ def get_dependencies(node_id: int) -> list[dict]:
 
 
 def update_node_content(node_id: int, content: str, source_url: str = "",
-                        source_title: str = "", quality_score: int = 0,
-                        tags: list | None = None) -> dict | None:
-    """Update the content and metadata of a knowledge node."""
+                        source_title: str = "", tags: list | None = None) -> dict | None:
+    """Update the content and metadata of a knowledge node (v0.2.2: 去 quality_score)."""
     now = datetime.now().isoformat()
     tags_json = json.dumps(tags or [], ensure_ascii=False)
     conn = get_connection()
     try:
         conn.execute(
             "UPDATE knowledge_nodes SET content=?, content_format='markdown', "
-            "source_url=?, source_title=?, quality_score=?, tags=?, "
+            "source_url=?, source_title=?, tags=?, "
             "cached_at=?, updated_at=date('now') WHERE id=?",
-            (content, source_url, source_title, quality_score,
+            (content, source_url, source_title,
              tags_json, now, node_id),
         )
         conn.commit()
@@ -176,36 +175,17 @@ def import_node_content(node_id: int, file_path: str) -> dict | None:
     if not path.exists():
         raise FileNotFoundError(f"文件不存在: {file_path}")
     content = path.read_text(encoding="utf-8")
-    return update_node_content(node_id, content,
-                               source_title=path.name,
-                               quality_score=3)
-
-
-def update_quality_score(node_id: int, score: int) -> dict | None:
-    """Update the quality score of a node's content (0-5)."""
-    if not (0 <= score <= 5):
-        raise ValueError("quality_score must be 0-5")
-    conn = get_connection()
-    try:
-        conn.execute(
-            "UPDATE knowledge_nodes SET quality_score=?, updated_at=date('now') WHERE id=?",
-            (score, node_id),
-        )
-        conn.commit()
-        return get_node(node_id)
-    finally:
-        conn.close()
+    return update_node_content(node_id, content, source_title=path.name)
 
 
 def list_low_quality_nodes(track_id: int | None = None,
                            threshold: int = 2) -> list[dict]:
-    """List nodes whose content quality is below threshold (no content or low quality)."""
+    """List nodes with no content (v0.2.2: 原 quality_score 阈值改为内容空判断)."""
     conn = get_connection()
     try:
         query = ("SELECT * FROM knowledge_nodes "
-                 "WHERE (content IS NULL OR content = '' OR quality_score < ? "
-                 "OR quality_score IS NULL)")
-        params = [threshold]
+                 "WHERE (content IS NULL OR content = '')")
+        params = []
         if track_id is not None:
             query += " AND track_id = ?"
             params.append(track_id)

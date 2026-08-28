@@ -36,16 +36,17 @@ def test_direct_api_fails_with_bad_url():
 
 
 def test_prompt_registry_keys():
-    """验证 5 个调用点全部注册"""
-    expected = {"assess_knowledge_graph", "diagnosis", "concept_content", "test_questions", "evaluate_answer"}
+    """验证全部调用点注册（v0.2.2: 5 个合并后调用点）"""
+    expected = {"diagnose_pack", "teach_pack",
+                "evaluate_answers_batch", "review_pack", "assessment"}
     assert set(PROMPT_REGISTRY.keys()) == expected
 
 
 def test_build_prompt_returns_three():
     """build_prompt 返回 (system, user, schema)"""
-    sys_p, user_p, schema = build_prompt("diagnosis", topic="T", concepts="[]",
-                                          self_assessment="3", user_description="desc",
-                                          test_results="none")
+    sys_p, user_p, schema = build_prompt("diagnose_pack", topic="T",
+                                          search_results="r", self_assessment="3",
+                                          user_description="desc")
     assert isinstance(sys_p, str)
     assert isinstance(user_p, str)
     assert isinstance(schema, dict)
@@ -53,57 +54,50 @@ def test_build_prompt_returns_three():
     assert len(user_p) > 0
 
 
-def test_build_prompt_knowledge_graph():
-    sys_p, user_p, schema = build_prompt("assess_knowledge_graph", topic="Python",
-                                          search_results="result1\nresult2")
+def test_build_prompt_diagnose_pack():
+    sys_p, user_p, schema = build_prompt("diagnose_pack", topic="Python",
+                                          search_results="result1\nresult2",
+                                          self_assessment="3", user_description="desc")
     assert "{topic}" not in user_p
     assert "{search_results}" not in user_p
     assert "Python" in user_p
     assert "result1" in user_p
+    assert schema["name"] == "diagnose_pack"
+    # 合并后 schema 同时含 KG 与诊断字段
+    props = schema["schema"]["properties"]
+    assert "concepts" in props and "edges" in props
+    assert "level" in props and "gaps" in props and "misconceptions" in props
 
 
-def test_build_prompt_concept_content():
-    sys_p, user_p, schema = build_prompt("concept_content",
+def test_build_prompt_teach_pack():
+    sys_p, user_p, schema = build_prompt("teach_pack",
                                           concept="变量", topic="Python", level="3",
                                           prerequisites="数据类型", misconceptions='[]')
     assert "变量" in user_p
     assert "Python" in user_p
-    assert schema == {
-        "name": "concept_content",
-        "schema": {
-            "type": "object",
-            "properties": {
-                "intuition": {"type": "string"},
-                "motivation": {"type": "string"},
-                "definition": {"type": "string"},
-                "boundary": {"type": "string"},
-                "connections": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "concept": {"type": "string"},
-                            "relation": {"type": "string"},
-                        },
-                        "required": ["concept", "relation"],
-                    },
-                },
-                "examples": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "question": {"type": "string"},
-                            "solution": {"type": "string"},
-                            "difficulty": {"type": "integer", "minimum": 1, "maximum": 5},
-                        },
-                        "required": ["question", "solution"],
-                    },
-                },
-            },
-            "required": ["intuition", "motivation", "definition", "boundary", "examples"],
-        },
-    }
+    assert schema["name"] == "teach_pack"
+    # 合并后 schema 同时含教学内容与检验题
+    props = schema["schema"]["properties"]
+    assert "intuition" in props and "definition" in props
+    assert "questions" in props
+
+
+def test_build_prompt_review_pack():
+    sys_p, user_p, schema = build_prompt("review_pack", n="2",
+                                          nodes_payload='[{"node_id":1}]')
+    assert "2" in user_p
+    assert schema["name"] == "review_pack"
+    assert schema["schema"]["properties"]["items"]
+
+
+def test_build_prompt_assessment():
+    sys_p, user_p, schema = build_prompt("assessment", topic="T",
+                                          node_count="5", completed_count="3",
+                                          stats='{"total":10}')
+    assert "T" in user_p
+    assert schema["name"] == "assessment_report"
+    props = schema["schema"]["properties"]
+    assert "overall_level" in props and "concept_mastery" in props
 
 
 def test_build_prompt_unknown():
@@ -112,16 +106,6 @@ def test_build_prompt_unknown():
         assert False
     except ValueError:
         pass
-
-
-def test_build_prompt_evaluate_answer():
-    sys_p, user_p, schema = build_prompt("evaluate_answer",
-                                          concept="变量", question="1+1=?",
-                                          correct_answer="2", learner_answer="3")
-    assert "变量" in user_p
-    assert "1+1" in user_p
-    assert "3" in user_p  # learner answer
-    assert schema["name"] == "evaluate_answer"
 
 
 if __name__ == "__main__":

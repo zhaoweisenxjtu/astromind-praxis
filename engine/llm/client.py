@@ -1,14 +1,13 @@
-"""LLM 双策略客户端：直连 API / Stdio 协议.
+"""LLM 双策略客户端：直连 API / Checkpoint 协议（v0.2.1）.
 
 直连 API: OpenAI-compatible API (httpx, 重试+超时)
-Stdio 协议: stdout [LLM_REQ] + prompt+schema -> stdin 读 agent JSON 响应
+Checkpoint 协议: 无直连配置时由 CheckpointLLMClient（engine/runs/）提供，
+  写 req-NNN.json → CLI exit 75 → agent 补答 → resume 消费（幂等重放）
 """
 
 import json
 import logging
-import sys
 from typing import Optional
-import select
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +17,7 @@ class LLMError(RuntimeError):
 
 
 class LLMClient:
-    """LLM 调用客户端，自动选择可用策略."""
+    """直连 API 客户端。checkpoint 模式见 engine.runs.CheckpointLLMClient."""
 
     def __init__(self, base_url: str = "", api_key: str = "", model: str = ""):
         self.base_url = base_url.rstrip("/") if base_url else ""
@@ -46,13 +45,9 @@ class LLMClient:
             Parsed JSON dict from LLM response.
 
         Raises:
-            LLMError: If all strategies fail.
+            LLMError: If direct API fails.
         """
-        if self._has_direct_config():
-            return self._call_direct_api(
-                system_prompt, user_prompt, schema, temperature, max_tokens
-            )
-        return self._call_stdio_protocol(
+        return self._call_direct_api(
             system_prompt, user_prompt, schema, temperature, max_tokens
         )
 
@@ -110,7 +105,7 @@ class LLMClient:
         last_error = None
         for attempt in range(3):
             try:
-                with httpx.Client(timeout=60) as client:
+                with httpx.Client(timeout=180) as client:
                     resp = client.post(url, json=body, headers=headers)
                     resp.raise_for_status()
                     data = resp.json()
@@ -169,7 +164,7 @@ class LLMClient:
         }
 
         try:
-            with httpx.Client(timeout=120) as client:
+            with httpx.Client(timeout=300) as client:
                 with client.stream("POST", url, json=body, headers=headers) as resp:
                     for line in resp.iter_lines():
                         if line.startswith("data: "):
@@ -188,34 +183,3 @@ class LLMClient:
 
     # ── Stdio protocol strategy ──
 
-    def _call_stdio_protocol(
-        self,
-        system_prompt: str,
-        user_prompt: str,
-        schema: Optional[dict] = None,
-        temperature: float = 0.7,
-        max_tokens: int = 4096,
-    ) -> dict:
-        """Stdio 协议：stdout 发出 [LLM_REQ], stdin 读回 JSON."""
-        request = {
-            "system_prompt": system_prompt,
-            "user_prompt": user_prompt,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-        }
-        if schema:
-            request["schema"] = schema
-
-        try:
-            print(f"\n[LLM_REQ] {json.dumps(request, ensure_ascii=False)}", flush=True)
-            line = sys.stdin.readline()
-            if not line:
-                raise LLMError("Stdio protocol: empty response from agent")
-            line = line.strip()
-            if line.startswith("[LLM_RSP]"):
-                line = line[len("[LLM_RSP]"):].strip()
-            return json.loads(line)
-        except json.JSONDecodeError as e:
-            raise LLMError(f"Stdio protocol: invalid JSON response: {e}") from e
-        except Exception as e:
-            raise LLMError(f"Stdio protocol error: {e}") from e
